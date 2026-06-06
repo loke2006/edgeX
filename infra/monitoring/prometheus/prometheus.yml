@@ -1,0 +1,35 @@
+# EdgeCloudX Prometheus Configuration
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "traffic-service"
+    static_configs:
+      - targets: ["traffic-service:8000"]
+    metrics_path: /metrics
+
+  - job_name: "routing-service"
+    static_configs:
+      - targets: ["routing-service:8000"]
+    metrics_path: /metrics
+
+  - job_name: "analytics-service"
+    static_configs:
+      - targets: ["analytics-service:8000"]
+    metrics_path: /metrics
+
+  - job_name: "alert-service"
+    static_configs:
+      - targets: ["alert-service:8000"]
+    metrics_path: /metrics
+
+  - job_name: "auth-service"
+    static_configs:
+      - targets: ["auth-service:8000"]
+    metrics_path: /metrics
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

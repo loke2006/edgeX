@@ -1,0 +1,307 @@
+# ============================================================================
+# EdgeCloudX — Docker Compose (Full Stack)
+# ============================================================================
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d kafka redis  # Start infra only
+#   docker compose logs -f            # Follow logs
+#   docker compose down -v            # Tear down with volumes
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # Apache Kafka (KRaft Mode — No ZooKeeper)
+  # --------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:latest
+    container_name: edgecloudx-kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      # KRaft mode (built-in for apache/kafka)
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      # Listeners
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      # Topics
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_NUM_PARTITIONS=3
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=1
+      # Performance
+      - KAFKA_LOG_RETENTION_HOURS=24
+      - KAFKA_MESSAGE_MAX_BYTES=10485760
+      # Cluster ID (required for KRaft)
+      - CLUSTER_ID=edgecloudx-kafka-cluster-01
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
+    networks:
+      - edgecloudx-net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Kafka Topic Initializer (runs once, creates required topics)
+  # --------------------------------------------------------------------------
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: edgecloudx-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo '=== Creating Kafka Topics ==='
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic traffic-density --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic ev-telemetry --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic emergency-alerts --partitions 1 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic anomaly-events --partitions 3 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic node-health --partitions 1 --replication-factor 1
+      echo '=== Topics Created ==='
+      /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka:9092
+      "
+    networks:
+      - edgecloudx-net
+
+  # --------------------------------------------------------------------------
+  # Redis 7 (State Layer + Pub/Sub)
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: edgecloudx-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - edgecloudx-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL 16 (Persistent Storage)
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: edgecloudx-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-edgecloudx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-edgecloudx_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-edgecloudx}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - edgecloudx-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-edgecloudx}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Traffic Service (FastAPI)
+  # --------------------------------------------------------------------------
+  traffic-service:
+    build:
+      context: ./services/traffic-service
+      dockerfile: Dockerfile
+    container_name: edgecloudx-traffic
+    ports:
+      - "${TRAFFIC_SERVICE_PORT:-8001}:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=traffic-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Routing Service (FastAPI)
+  # --------------------------------------------------------------------------
+  routing-service:
+    build:
+      context: ./services/routing-service
+      dockerfile: Dockerfile
+    container_name: edgecloudx-routing
+    ports:
+      - "${ROUTING_SERVICE_PORT:-8002}:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=routing-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Analytics Service (FastAPI)
+  # --------------------------------------------------------------------------
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: edgecloudx-analytics
+    ports:
+      - "${ANALYTICS_SERVICE_PORT:-8003}:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=analytics-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Alert Service (FastAPI)
+  # --------------------------------------------------------------------------
+  alert-service:
+    build:
+      context: ./services/alert-service
+      dockerfile: Dockerfile
+    container_name: edgecloudx-alert
+    ports:
+      - "${ALERT_SERVICE_PORT:-8004}:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=alert-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Auth Service (FastAPI)
+  # --------------------------------------------------------------------------
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: edgecloudx-auth
+    ports:
+      - "${AUTH_SERVICE_PORT:-8005}:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES:-60}
+      - SERVICE_NAME=auth-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Edge AI Node (Simulation)
+  # --------------------------------------------------------------------------
+  edge-node:
+    build:
+      context: ./services/edge-node
+      dockerfile: Dockerfile
+    container_name: edgecloudx-edge-node
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - EDGE_NODE_ID=edge-node-01
+      - INTERSECTION_COUNT=16
+      - GRID_ROWS=4
+      - GRID_COLS=4
+      - VEHICLE_DENSITY=medium
+      - EVENT_INTERVAL_MS=2000
+      - ENABLE_YOLO=false
+      - EV_COUNT=4
+      - EMERGENCY_PROBABILITY=0.02
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Compute Workers (Ray — Phase 3 placeholder)
+  # --------------------------------------------------------------------------
+  # compute-workers:
+  #   build:
+  #     context: ./services/compute-workers
+  #     dockerfile: Dockerfile
+  #   container_name: edgecloudx-compute
+  #   environment:
+  #     - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - RAY_HEAD_ADDRESS=auto
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - edgecloudx-net
+  #   restart: unless-stopped
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  kafka_data:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  edgecloudx-net:
+    driver: bridge
+    name: edgecloudx-net
