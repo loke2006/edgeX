@@ -91,6 +91,7 @@ curl http://localhost:8002/health  # Routing Service
 curl http://localhost:8003/health  # Analytics Service
 curl http://localhost:8004/health  # Alert Service
 curl http://localhost:8005/health  # Auth Service
+curl http://localhost:8006/health  # Compute Workers
 ```
 
 ## Services
@@ -102,6 +103,7 @@ curl http://localhost:8005/health  # Auth Service
 | Analytics Service | 8003 | Congestion analytics & history |
 | Alert Service | 8004 | Emergency alert management |
 | Auth Service | 8005 | JWT authentication |
+| Compute Workers | 8006 | Ray-based distributed compute |
 | Dashboard | 8000 | Real-time operations dashboard |
 | Kafka | 9092/9094 | Event streaming (internal/external) |
 | Redis | 6379 | State cache & Pub/Sub |
@@ -110,9 +112,9 @@ curl http://localhost:8005/health  # Auth Service
 ## Development Phases
 
 - [x] **Phase 1** — Core Infrastructure (Kafka, Redis, Postgres, FastAPI)
-- [ ] **Phase 2** — Edge AI Nodes (YOLOv8, OpenCV, Kafka Producers)
-- [ ] **Phase 3** — Distributed Compute (Ray Cluster)
-- [ ] **Phase 4** — Real-Time Dashboard (Django Channels)
+- [x] **Phase 2** — Edge AI Nodes (YOLOv8, OpenCV, Kafka Producers)
+- [x] **Phase 3** — Distributed Compute (Ray Cluster)
+- [x] **Phase 4** — Real-Time Dashboard (Django Channels)
 - [ ] **Phase 5** — Cloud-Native (Kubernetes)
 - [ ] **Phase 6** — Observability (Prometheus, Grafana, Loki)
 - [ ] **Phase 7** — Federated Learning (Flower)
