@@ -41,7 +41,6 @@ async def get_intersection(
         raise HTTPException(status_code=404, detail=f"Intersection {intersection_id} not found")
     return intersection
 
-
 @router.post("/update", response_model=IntersectionSchema)
 async def update_traffic(
     update: TrafficUpdateSchema,

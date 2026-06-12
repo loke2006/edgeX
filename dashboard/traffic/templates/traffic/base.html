@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="EdgeCloudX — Autonomous Smart City Traffic & Navigation Grid Dashboard">
+    <title>{% block title %}EdgeCloudX Dashboard{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">EdgeCloudX</span>
+            </div>
+            <span class="version-badge">v0.1.0</span>
+        </div>
+
+        <div class="sidebar-nav">
+            <a href="/" class="nav-item active" id="nav-dashboard">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">Dashboard</span>
+            </a>
+            <a href="#traffic-grid" class="nav-item" id="nav-traffic">
+                <span class="nav-icon">🚦</span>
+                <span class="nav-label">Traffic Grid</span>
+            </a>
+            <a href="#heatmap-section" class="nav-item" id="nav-heatmap">
+                <span class="nav-icon">🔥</span>
+                <span class="nav-label">Heatmap</span>
+            </a>
+            <a href="#ev-section" class="nav-item" id="nav-ev">
+                <span class="nav-icon">🔋</span>
+                <span class="nav-label">EV Fleet</span>
+            </a>
+            <a href="#alerts-section" class="nav-item" id="nav-alerts">
+                <span class="nav-icon">🚨</span>
+                <span class="nav-label">Alerts</span>
+            </a>
+            <a href="#health-section" class="nav-item" id="nav-health">
+                <span class="nav-icon">💚</span>
+                <span class="nav-label">Services</span>
+            </a>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="connection-status" id="ws-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">Connecting...</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <h1 id="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+                <span class="live-badge" id="live-badge">
+                    <span class="live-dot"></span> LIVE
+                </span>
+            </div>
+            <div class="top-bar-right">
+                <div class="metric-pill" id="total-vehicles-pill">
+                    <span class="pill-label">Vehicles</span>
+                    <span class="pill-value" id="total-vehicles">—</span>
+                </div>
+                <div class="metric-pill" id="avg-congestion-pill">
+                    <span class="pill-label">Avg. Congestion</span>
+                    <span class="pill-value" id="avg-congestion">—</span>
+                </div>
+                <div class="metric-pill warning" id="alerts-pill">
+                    <span class="pill-label">Alerts</span>
+                    <span class="pill-value" id="active-alerts">0</span>
+                </div>
+                <div class="clock" id="clock"></div>
+            </div>
+        </header>
+
+        <div class="content-area">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

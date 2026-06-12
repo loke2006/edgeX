@@ -1,5 +1,5 @@
 """
-EdgeCloudX Traffic Service — Pydantic Schemas
+EdgeCloudX Traffic Service — Pydantic Schemas (validations for input data)
 """
 
 from datetime import datetime

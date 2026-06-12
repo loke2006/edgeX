@@ -1,0 +1,256 @@
+{% extends "traffic/base.html" %}
+{% load static %}
+
+{% block title %}EdgeCloudX — Live Traffic Dashboard{% endblock %}
+{% block page_title %}Live Traffic Overview{% endblock %}
+
+{% block content %}
+<!-- Stats Cards Row -->
+<div class="stats-row" id="stats-row">
+    <div class="stat-card">
+        <div class="stat-icon">🚗</div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-total-vehicles">0</span>
+            <span class="stat-label">Total Vehicles</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-avg-congestion">0.00</span>
+            <span class="stat-label">Avg. Congestion</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🔴</div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-hotspots">0</span>
+            <span class="stat-label">Hotspots</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🔋</div>
+        <div class="stat-info">
+            <span class="stat-value" id="stat-ev-count">4</span>
+            <span class="stat-label">Active EVs</span>
+        </div>
+    </div>
+</div>
+
+<!-- Main Grid + Heatmap Row -->
+<div class="dashboard-grid">
+    <!-- Traffic Grid -->
+    <section class="card traffic-grid-card" id="traffic-grid">
+        <div class="card-header">
+            <h2>🚦 Live Traffic Grid</h2>
+            <span class="card-badge" id="grid-update-time">—</span>
+        </div>
+        <div class="card-body">
+            <div class="traffic-grid" id="traffic-grid-container"
+                 style="grid-template-columns: repeat({{ grid_cols }}, 1fr);">
+                {% for intersection in intersections %}
+                <div class="intersection-cell"
+                     id="cell-{{ intersection.intersection_id }}"
+                     data-row="{{ intersection.grid_row }}"
+                     data-col="{{ intersection.grid_col }}"
+                     data-congestion="{{ intersection.congestion_score|default:'0' }}">
+                    <div class="signal-light {{ intersection.signal_state|default:'red' }}">
+                        <div class="signal-dot"></div>
+                    </div>
+                    <div class="cell-id">{{ intersection.intersection_id }}</div>
+                    <div class="cell-vehicles">
+                        <span class="vehicle-icon">🚗</span>
+                        <span class="vehicle-count">{{ intersection.vehicle_count|default:'0' }}</span>
+                    </div>
+                    <div class="cell-congestion">
+                        <div class="congestion-bar">
+                            <div class="congestion-fill"
+                                 style="width: {{ intersection.congestion_score|default:'0'|floatformat:0 }}%;"></div>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <!-- Seed empty grid if no data yet -->
+                {% for row in "0123" %}
+                {% for col in "0123" %}
+                <div class="intersection-cell"
+                     id="cell-int-{{ row }}-{{ col }}"
+                     data-row="{{ row }}"
+                     data-col="{{ col }}"
+                     data-congestion="0">
+                    <div class="signal-light red">
+                        <div class="signal-dot"></div>
+                    </div>
+                    <div class="cell-id">int-{{ row }}-{{ col }}</div>
+                    <div class="cell-vehicles">
+                        <span class="vehicle-icon">🚗</span>
+                        <span class="vehicle-count">0</span>
+                    </div>
+                    <div class="cell-congestion">
+                        <div class="congestion-bar">
+                            <div class="congestion-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Heatmap -->
+    <section class="card heatmap-card" id="heatmap-section">
+        <div class="card-header">
+            <h2>🔥 Congestion Heatmap</h2>
+            <span class="card-badge" id="heatmap-update-time">—</span>
+        </div>
+        <div class="card-body heatmap-body">
+            <canvas id="heatmap-canvas" width="400" height="400"></canvas>
+            <div class="heatmap-legend">
+                <span class="legend-low">Low</span>
+                <div class="legend-gradient"></div>
+                <span class="legend-high">Critical</span>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- EV Fleet + Alerts Row -->
+<div class="dashboard-grid">
+    <!-- EV Fleet Tracker -->
+    <section class="card ev-card" id="ev-section">
+        <div class="card-header">
+            <h2>🔋 EV Fleet Tracker</h2>
+            <span class="card-badge ev-badge" id="ev-update-time">—</span>
+        </div>
+        <div class="card-body">
+            <div class="ev-list" id="ev-list">
+                <div class="ev-item" id="ev-0" data-ev-id="ev-0">
+                    <div class="ev-icon">🚕</div>
+                    <div class="ev-info">
+                        <span class="ev-name">EV-0</span>
+                        <span class="ev-position">Position: (0, 0)</span>
+                    </div>
+                    <div class="ev-battery">
+                        <div class="battery-bar">
+                            <div class="battery-fill" style="width: 100%;"></div>
+                        </div>
+                        <span class="battery-pct">100%</span>
+                    </div>
+                    <span class="ev-status moving">Moving</span>
+                </div>
+                <div class="ev-item" id="ev-1" data-ev-id="ev-1">
+                    <div class="ev-icon">🚕</div>
+                    <div class="ev-info">
+                        <span class="ev-name">EV-1</span>
+                        <span class="ev-position">Position: (0, 1)</span>
+                    </div>
+                    <div class="ev-battery">
+                        <div class="battery-bar">
+                            <div class="battery-fill" style="width: 85%;"></div>
+                        </div>
+                        <span class="battery-pct">85%</span>
+                    </div>
+                    <span class="ev-status moving">Moving</span>
+                </div>
+                <div class="ev-item" id="ev-2" data-ev-id="ev-2">
+                    <div class="ev-icon">🚕</div>
+                    <div class="ev-info">
+                        <span class="ev-name">EV-2</span>
+                        <span class="ev-position">Position: (0, 2)</span>
+                    </div>
+                    <div class="ev-battery">
+                        <div class="battery-bar">
+                            <div class="battery-fill" style="width: 72%;"></div>
+                        </div>
+                        <span class="battery-pct">72%</span>
+                    </div>
+                    <span class="ev-status moving">Moving</span>
+                </div>
+                <div class="ev-item" id="ev-3" data-ev-id="ev-3">
+                    <div class="ev-icon">🚕</div>
+                    <div class="ev-info">
+                        <span class="ev-name">EV-3</span>
+                        <span class="ev-position">Position: (0, 3)</span>
+                    </div>
+                    <div class="ev-battery">
+                        <div class="battery-bar">
+                            <div class="battery-fill" style="width: 60%;"></div>
+                        </div>
+                        <span class="battery-pct">60%</span>
+                    </div>
+                    <span class="ev-status charging">Charging</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Emergency Alerts -->
+    <section class="card alerts-card" id="alerts-section">
+        <div class="card-header">
+            <h2>🚨 Emergency Alerts</h2>
+            <span class="card-badge alert-badge" id="alert-count">0 Active</span>
+        </div>
+        <div class="card-body">
+            <div class="alerts-list" id="alerts-list">
+                <div class="alert-empty" id="alert-empty">
+                    <span class="alert-empty-icon">✅</span>
+                    <span class="alert-empty-text">No active emergencies</span>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- Service Health Row -->
+<section class="card health-card" id="health-section">
+    <div class="card-header">
+        <h2>💚 Service Health</h2>
+    </div>
+    <div class="card-body">
+        <div class="health-grid" id="health-grid">
+            {% for svc in services_health %}
+            <div class="health-item {{ svc.status }}">
+                <span class="health-dot"></span>
+                <span class="health-name">{{ svc.name }}</span>
+                <span class="health-status">{{ svc.status }}</span>
+            </div>
+            {% empty %}
+            <div class="health-item healthy">
+                <span class="health-dot"></span>
+                <span class="health-name">Traffic</span>
+                <span class="health-status">healthy</span>
+            </div>
+            <div class="health-item healthy">
+                <span class="health-dot"></span>
+                <span class="health-name">Routing</span>
+                <span class="health-status">healthy</span>
+            </div>
+            <div class="health-item healthy">
+                <span class="health-dot"></span>
+                <span class="health-name">Analytics</span>
+                <span class="health-status">healthy</span>
+            </div>
+            <div class="health-item healthy">
+                <span class="health-dot"></span>
+                <span class="health-name">Alerts</span>
+                <span class="health-status">healthy</span>
+            </div>
+            <div class="health-item healthy">
+                <span class="health-dot"></span>
+                <span class="health-name">Auth</span>
+                <span class="health-status">healthy</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/websocket.js' %}"></script>
+<script src="{% static 'js/traffic_grid.js' %}"></script>
+<script src="{% static 'js/heatmap.js' %}"></script>
+<script src="{% static 'js/charts.js' %}"></script>
+{% endblock %}

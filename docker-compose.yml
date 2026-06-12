@@ -267,25 +267,55 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------------------
-  # Compute Workers (Ray — Phase 3 placeholder)
+  # Compute Workers (Ray — Phase 3)
   # --------------------------------------------------------------------------
-  # compute-workers:
-  #   build:
-  #     context: ./services/compute-workers
-  #     dockerfile: Dockerfile
-  #   container_name: edgecloudx-compute
-  #   environment:
-  #     - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - RAY_HEAD_ADDRESS=auto
-  #   depends_on:
-  #     kafka:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   networks:
-  #     - edgecloudx-net
-  #   restart: unless-stopped
+  compute-workers:
+    build:
+      context: ./services/compute-workers
+      dockerfile: Dockerfile
+    container_name: edgecloudx-compute
+    ports:
+      - "${COMPUTE_WORKERS_PORT:-8006}:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - RAY_NUM_CPUS=2
+      - SERVICE_NAME=compute-workers
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Real-Time Dashboard (Django Channels — Phase 4)
+  # --------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: edgecloudx-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-8000}:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - TRAFFIC_SERVICE_URL=http://traffic-service:8000
+      - ROUTING_SERVICE_URL=http://routing-service:8000
+      - ANALYTICS_SERVICE_URL=http://analytics-service:8000
+      - ALERT_SERVICE_URL=http://alert-service:8000
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - DJANGO_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-dashboard}
+    depends_on:
+      redis:
+        condition: service_healthy
+      traffic-service:
+        condition: service_started
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
 
 # ============================================================================
 # Volumes
