@@ -10,13 +10,13 @@ import json
 import logging
 
 import redis.asyncio as aioredis
-from channels.generic.websocket import AsyncWebSocketConsumer
+from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 
-class BaseRedisConsumer(AsyncWebSocketConsumer):
+class BaseRedisConsumer(AsyncWebsocketConsumer):
     """
     Base WebSocket consumer that subscribes to a Redis Pub/Sub channel
     and forwards messages to the connected client.
