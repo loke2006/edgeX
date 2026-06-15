@@ -78,13 +78,18 @@ async def handle_ev_events(messages: list[dict]) -> None:
     for msg in messages:
         ev_id = msg.get("ev_id", "unknown")
         key = f"ev:{ev_id}"
+
+        # Extract position (nested under 'position' key from edge node)
+        position = msg.get("position", {})
+        target = msg.get("target", {})
+
         r.hset(key, mapping={
             "ev_id": ev_id,
-            "row": str(msg.get("row", 0)),
-            "col": str(msg.get("col", 0)),
-            "dest_row": str(msg.get("dest_row", settings.grid_rows - 1)),
-            "dest_col": str(msg.get("dest_col", settings.grid_cols - 1)),
-            "battery": str(msg.get("battery_percent", 100)),
+            "row": str(position.get("row", msg.get("row", 0))),
+            "col": str(position.get("col", msg.get("col", 0))),
+            "dest_row": str(target.get("row", msg.get("dest_row", settings.grid_rows - 1))),
+            "dest_col": str(target.get("col", msg.get("dest_col", settings.grid_cols - 1))),
+            "battery": str(msg.get("battery_level", msg.get("battery_percent", 100))),
             "speed": str(msg.get("speed_kmh", 0)),
             "status": msg.get("status", "moving"),
         })

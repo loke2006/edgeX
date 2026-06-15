@@ -47,8 +47,10 @@ class ComputeKafkaConsumer:
             auto_offset_reset="latest",
             enable_auto_commit=True,
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-            retry_backoff_ms=1000,
+            retry_backoff_ms=2000,
+            request_timeout_ms=40000,
             session_timeout_ms=30000,
+            metadata_max_age_ms=10000,
         )
 
         for attempt in range(10):
@@ -78,41 +80,53 @@ class ComputeKafkaConsumer:
             logger.info("Kafka consumer stopped")
 
     async def consume(self) -> None:
-        """Main consume loop — routes messages to registered handlers."""
+        """Main consume loop — routes messages to registered handlers.
+        Auto-restarts on transient errors."""
         if not self.consumer or not self._running:
             logger.warning("Consumer not started, skipping consume loop")
             return
 
+        while self._running:
+            try:
+                await self._consume_loop()
+            except Exception as e:
+                logger.error(
+                    f"Consumer loop crashed: {e}. Restarting in 5s...",
+                    exc_info=True,
+                )
+                await asyncio.sleep(5)
+
+    async def _consume_loop(self) -> None:
+        """Inner consume loop — processes messages in batches."""
         batch: dict[str, list[dict]] = {}
         batch_size = 10
         batch_timeout = 2.0  # seconds
         last_flush = asyncio.get_event_loop().time()
 
-        try:
-            async for message in self.consumer:
-                topic = message.topic
-                data = message.value
+        async for message in self.consumer:
+            if not self._running:
+                break
 
-                # Accumulate batch
-                if topic not in batch:
-                    batch[topic] = []
-                batch[topic].append(data)
+            topic = message.topic
+            data = message.value
 
-                now = asyncio.get_event_loop().time()
-                total_msgs = sum(len(v) for v in batch.values())
+            # Accumulate batch
+            if topic not in batch:
+                batch[topic] = []
+            batch[topic].append(data)
 
-                # Flush if batch is full or timeout reached
-                if total_msgs >= batch_size or (now - last_flush) >= batch_timeout:
-                    await self._flush_batch(batch)
-                    batch = {}
-                    last_flush = now
+            now = asyncio.get_event_loop().time()
+            total_msgs = sum(len(v) for v in batch.values())
 
-        except Exception as e:
-            logger.error(f"Consumer loop error: {e}", exc_info=True)
-        finally:
-            # Flush remaining
-            if batch:
+            # Flush if batch is full or timeout reached
+            if total_msgs >= batch_size or (now - last_flush) >= batch_timeout:
                 await self._flush_batch(batch)
+                batch = {}
+                last_flush = now
+
+        # Flush remaining
+        if batch:
+            await self._flush_batch(batch)
 
     async def _flush_batch(self, batch: dict[str, list[dict]]) -> None:
         """Dispatch a batch of messages to registered handlers."""
