@@ -165,14 +165,24 @@ Cross-cutting concerns shared by all microservices:
 - [x] **Phase 1** — Core Infrastructure (Kafka, Redis, Postgres, FastAPI)
 - [x] **Phase 2** — Edge AI Nodes (YOLOv8, OpenCV, Kafka Producers)
 - [x] **Phase 3** — Distributed Compute (Ray Cluster)
+  - Congestion analysis, route optimization, heatmap generation
+  - Spark Structured Streaming (rolling averages, hourly aggregations)
+  - Historical analytics (trends, peak hours)
 - [x] **Phase 4** — Real-Time Dashboard (Django Channels)
-- [x] **Phase 5** — Observability (Trace IDs, Structured Logging, Prometheus, Heartbeats)
-- [x] **Phase 6** — Resilience (Dead Letter Queue, Adaptive Signals, Historical Analytics)
-- [x] **Phase 7** — Security (RBAC, Audit Logs, Hardening, JWT Refresh)
-- [x] **Phase 8** — Big Data (Spark Streaming, OpenTelemetry, Jaeger)
-- [ ] **Phase 9** — Cloud-Native (Kubernetes)
-- [ ] **Phase 10** — Federated Learning (Flower)
-- [ ] **Phase 11** — Chaos Engineering
+  - Live traffic grid, heatmap, alerts, EV tracking
+  - Node health monitoring, adaptive signal status
+- [ ] **Phase 5** — Cloud-Native (Kubernetes)
+- [ ] **Phase 6** — Observability (Prometheus, Grafana, Loki)
+  - Structured JSON logging with trace correlation
+  - Correlation / Trace IDs (trace_id + event_id end-to-end)
+  - Node heartbeats (CPU, memory, FPS, uptime)
+  - Custom Prometheus metrics (congestion, latency, DLQ)
+  - Dead Letter Queue with retry + backoff
+  - OpenTelemetry + Jaeger distributed tracing
+  - RBAC (admin, operator, viewer, edge_node)
+  - Audit logging, security headers, JWT refresh
+- [ ] **Phase 7** — Federated Learning (Flower)
+- [ ] **Phase 8** — Chaos Engineering
 
 ## API Endpoints
 
