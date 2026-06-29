@@ -30,6 +30,11 @@ scrape_configs:
       - targets: ["auth-service:8000"]
     metrics_path: /metrics
 
+  - job_name: "compute-workers"
+    static_configs:
+      - targets: ["compute-workers:8000"]
+    metrics_path: /metrics
+
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

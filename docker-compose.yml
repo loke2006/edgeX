@@ -1,5 +1,5 @@
 # ============================================================================
-# EdgeCloudX — Docker Compose (Full Stack)
+# EdgeCloudX — Docker Compose (Full Stack v2)
 # ============================================================================
 # Usage:
 #   docker compose up -d              # Start all services
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------------------
-  # Kafka Topic Initializer (runs once, creates required topics)
+  # Kafka Topic Initializer (runs once, creates required topics + DLQ topics)
   # --------------------------------------------------------------------------
   kafka-init:
     image: apache/kafka:latest
@@ -68,6 +68,10 @@ services:
       /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic emergency-alerts --partitions 1 --replication-factor 1
       /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic anomaly-events --partitions 3 --replication-factor 1
       /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic node-health --partitions 1 --replication-factor 1
+      echo '=== Creating DLQ Topics ==='
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic traffic-density-dlq --partitions 1 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic ev-telemetry-dlq --partitions 1 --replication-factor 1
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --topic emergency-alerts-dlq --partitions 1 --replication-factor 1
       echo '=== Topics Created ==='
       /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka:9092
       "
@@ -122,8 +126,8 @@ services:
   # --------------------------------------------------------------------------
   traffic-service:
     build:
-      context: ./services/traffic-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/traffic-service/Dockerfile
     container_name: edgecloudx-traffic
     ports:
       - "${TRAFFIC_SERVICE_PORT:-8001}:8000"
@@ -132,6 +136,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=${DATABASE_URL}
       - SERVICE_NAME=traffic-service
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       kafka:
         condition: service_healthy
@@ -148,8 +154,8 @@ services:
   # --------------------------------------------------------------------------
   routing-service:
     build:
-      context: ./services/routing-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/routing-service/Dockerfile
     container_name: edgecloudx-routing
     ports:
       - "${ROUTING_SERVICE_PORT:-8002}:8000"
@@ -158,6 +164,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=${DATABASE_URL}
       - SERVICE_NAME=routing-service
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       kafka:
         condition: service_healthy
@@ -172,8 +180,8 @@ services:
   # --------------------------------------------------------------------------
   analytics-service:
     build:
-      context: ./services/analytics-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
     container_name: edgecloudx-analytics
     ports:
       - "${ANALYTICS_SERVICE_PORT:-8003}:8000"
@@ -182,6 +190,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=${DATABASE_URL}
       - SERVICE_NAME=analytics-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       kafka:
         condition: service_healthy
@@ -198,8 +207,8 @@ services:
   # --------------------------------------------------------------------------
   alert-service:
     build:
-      context: ./services/alert-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/alert-service/Dockerfile
     container_name: edgecloudx-alert
     ports:
       - "${ALERT_SERVICE_PORT:-8004}:8000"
@@ -208,6 +217,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=${DATABASE_URL}
       - SERVICE_NAME=alert-service
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       kafka:
         condition: service_healthy
@@ -222,8 +233,8 @@ services:
   # --------------------------------------------------------------------------
   auth-service:
     build:
-      context: ./services/auth-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/auth-service/Dockerfile
     container_name: edgecloudx-auth
     ports:
       - "${AUTH_SERVICE_PORT:-8005}:8000"
@@ -233,6 +244,7 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES:-60}
       - SERVICE_NAME=auth-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,8 +257,8 @@ services:
   # --------------------------------------------------------------------------
   edge-node:
     build:
-      context: ./services/edge-node
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/edge-node/Dockerfile
     container_name: edgecloudx-edge-node
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
@@ -271,8 +283,8 @@ services:
   # --------------------------------------------------------------------------
   compute-workers:
     build:
-      context: ./services/compute-workers
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/compute-workers/Dockerfile
     container_name: edgecloudx-compute
     ports:
       - "${COMPUTE_WORKERS_PORT:-8006}:8000"
@@ -281,6 +293,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - RAY_NUM_CPUS=2
       - SERVICE_NAME=compute-workers
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       kafka:
         condition: service_healthy
@@ -295,8 +308,8 @@ services:
   # --------------------------------------------------------------------------
   dashboard:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dashboard/Dockerfile
     container_name: edgecloudx-dashboard
     ports:
       - "${DASHBOARD_PORT:-8000}:8000"
@@ -317,6 +330,102 @@ services:
       - edgecloudx-net
     restart: unless-stopped
 
+  # --------------------------------------------------------------------------
+  # Prometheus (Metrics Collection)
+  # --------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: edgecloudx-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Grafana (Dashboards & Visualization)
+  # --------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: edgecloudx-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/monitoring/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Loki (Log Aggregation)
+  # --------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:latest
+    container_name: edgecloudx-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Jaeger (Distributed Tracing)
+  # --------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: edgecloudx-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Spark Analytics (Structured Streaming — Phase D)
+  # --------------------------------------------------------------------------
+  spark-analytics:
+    build:
+      context: .
+      dockerfile: services/spark-analytics/Dockerfile
+    container_name: edgecloudx-spark
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - JDBC_URL=jdbc:postgresql://postgres:5432/edgecloudx
+      - POSTGRES_USER=${POSTGRES_USER:-edgecloudx}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-edgecloudx_secret}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - edgecloudx-net
+    restart: unless-stopped
+
 # ============================================================================
 # Volumes
 # ============================================================================
@@ -326,6 +435,12 @@ volumes:
   redis_data:
     driver: local
   postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
     driver: local
 
 # ============================================================================

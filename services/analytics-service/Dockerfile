@@ -2,14 +2,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Install Python dependencies
+COPY services/analytics-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy shared modules
+COPY shared/ /app/shared/
+
+# Copy application code
+COPY services/analytics-service/ .
+
+# Create non-root user
+RUN adduser --disabled-password --no-create-home --gecos "" appuser
+USER appuser
 
 EXPOSE 8000
 

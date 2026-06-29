@@ -8,14 +8,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY dashboard/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY dashboard/ .
 
 # Collect static files
 RUN python manage.py collectstatic --noinput 2>/dev/null || true
+
+# Create non-root user
+RUN adduser --disabled-password --no-create-home --gecos "" appuser
+USER appuser
 
 # Expose port
 EXPOSE 8000

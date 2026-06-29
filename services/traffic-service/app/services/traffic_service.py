@@ -1,9 +1,12 @@
 """
 EdgeCloudX Traffic Service — Business Logic
+==============================================
+Enhanced with trace ID propagation, Prometheus metrics, and Redis latency tracking.
 """
 
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -14,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models.traffic import CongestionLevel, Intersection, SignalState, TrafficEvent
 from app.schemas.traffic import IntersectionSchema, TrafficGridSchema, TrafficUpdateSchema
+from shared.metrics import EVENTS_TOTAL, DB_LATENCY, REDIS_LATENCY
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -72,8 +76,14 @@ class TrafficService:
         )
         return result.scalar_one_or_none()
 
-    async def process_traffic_update(self, update: TrafficUpdateSchema) -> Intersection:
+    async def process_traffic_update(
+        self,
+        update: TrafficUpdateSchema,
+        trace_id: str = "",
+        event_id: str = "",
+    ) -> Intersection:
         """Process an incoming traffic update from an edge node."""
+        db_start = time.time()
 
         # Find or create intersection
         intersection = await self.get_intersection(update.intersection_id)
@@ -97,16 +107,12 @@ class TrafficService:
         intersection.congestion_level = congestion_level
         intersection.last_updated = datetime.utcnow()
 
-        # Auto-adjust signal based on congestion
-        if congestion_level == CongestionLevel.CRITICAL:
-            intersection.signal_state = SignalState.GREEN
-        elif congestion_level == CongestionLevel.LOW:
-            intersection.signal_state = SignalState.RED
-
-        # Record historical event
+        # Record historical event with trace context
         event = TrafficEvent(
             intersection_id=update.intersection_id,
             edge_node_id=update.edge_node_id,
+            trace_id=trace_id or None,
+            event_id=event_id or None,
             vehicle_count=update.vehicle_count,
             congestion_score=update.congestion_score,
             congestion_level=congestion_level,
@@ -117,18 +123,29 @@ class TrafficService:
         self.db.add(event)
         await self.db.flush()
 
+        # Track DB latency
+        DB_LATENCY.labels(service="traffic-service", operation="process_update").observe(
+            time.time() - db_start
+        )
+
         # Publish to Redis for real-time dashboard
-        await self._publish_to_redis(intersection)
+        await self._publish_to_redis(intersection, trace_id=trace_id)
 
         logger.info(
-            f"Processed traffic update: {update.intersection_id} "
-            f"vehicles={update.vehicle_count} congestion={update.congestion_score:.2f}"
+            "Processed traffic update",
+            extra={
+                "trace_id": trace_id,
+                "intersection": update.intersection_id,
+                "vehicles": update.vehicle_count,
+                "congestion": round(update.congestion_score, 2),
+            },
         )
 
         return intersection
 
-    async def _publish_to_redis(self, intersection: Intersection) -> None:
+    async def _publish_to_redis(self, intersection: Intersection, trace_id: str = "") -> None:
         """Publish intersection state update to Redis Pub/Sub."""
+        redis_start = time.time()
         try:
             r = aioredis.from_url(settings.redis_url)
 
@@ -154,8 +171,12 @@ class TrafficService:
             )
 
             await r.aclose()
+
+            REDIS_LATENCY.labels(service="traffic-service", operation="publish").observe(
+                time.time() - redis_start
+            )
         except Exception as e:
-            logger.warning(f"Failed to publish to Redis: {e}")
+            logger.warning(f"Failed to publish to Redis: {e}", extra={"trace_id": trace_id})
 
     async def _seed_grid(self) -> list[Intersection]:
         """Seed the database with initial intersection grid."""
@@ -177,7 +198,10 @@ class TrafficService:
 
         await self.db.flush()
         logger.info(
-            f"Seeded {len(intersections)} intersections "
-            f"in {settings.grid_rows}x{settings.grid_cols} grid"
+            "Grid seeded",
+            extra={
+                "count": len(intersections),
+                "grid": f"{settings.grid_rows}x{settings.grid_cols}",
+            },
         )
         return intersections

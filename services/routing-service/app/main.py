@@ -3,30 +3,47 @@ EdgeCloudX Routing Service — Main Application
 ==============================================
 FastAPI microservice for EV pathfinding and route optimization.
 Uses A* algorithm with real-time congestion data from Redis.
+
+Enhanced with: structured logging, security headers, Prometheus metrics.
 """
 
-import logging
-from contextlib import asynccontextmanager
+import os
+import sys
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from prometheus_fastapi_instrumentator import Instrumentator
+# Add shared modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "shared"))
 
-from app.config import get_settings
-from app.routers import routing
+from shared.logging import setup_logging  # noqa: E402
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)-25s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+setup_logging("routing-service")
+
+import logging  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from prometheus_fastapi_instrumentator import Instrumentator  # noqa: E402
+from shared.metrics import SERVICE_INFO  # noqa: E402
+from shared.middleware import add_security_headers  # noqa: E402
+
+from app.config import get_settings  # noqa: E402
+from app.routers import routing  # noqa: E402
+
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("EdgeCloudX Routing Service — Starting")
+    logger.info("Routing Service starting")
+
+    # Store auth service URL for RBAC
+    app.state.auth_service_url = os.environ.get(
+        "AUTH_SERVICE_URL", "http://auth-service:8000"
+    )
+
+    SERVICE_INFO.info({"service": "routing-service", "version": "0.2.0"})
+
     yield
     logger.info("Routing Service stopped")
 
@@ -34,7 +51,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="EdgeCloudX Routing Service",
     description="EV pathfinding and route optimization with real-time congestion awareness",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -48,13 +65,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+add_security_headers(app)
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 app.include_router(routing.router)
 
 
 @app.get("/health")
 async def health():
-    return {"service": settings.service_name, "status": "healthy", "version": "0.1.0"}
+    return {"service": settings.service_name, "status": "healthy", "version": "0.2.0"}
 
 
 @app.get("/health/liveness")
@@ -64,4 +82,4 @@ async def liveness():
 
 @app.get("/")
 async def root():
-    return {"service": "EdgeCloudX Routing Service", "version": "0.1.0", "docs": "/docs"}
+    return {"service": "EdgeCloudX Routing Service", "version": "0.2.0", "docs": "/docs"}

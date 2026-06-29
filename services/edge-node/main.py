@@ -3,29 +3,35 @@ EdgeCloudX Edge Node — Main Entry Point
 ==========================================
 Orchestrates the edge node simulation:
 1. Generates synthetic traffic data (or runs YOLOv8 on video frames)
-2. Publishes traffic density events to Kafka
+2. Publishes traffic density events to Kafka with trace IDs
 3. Simulates EV telemetry and publishes to Kafka
 4. Detects emergencies and publishes alerts
-5. Sends periodic health heartbeats
+5. Sends periodic health heartbeats with system telemetry
 """
 
 import asyncio
-import logging
+import os
 import random
+import sys
 import time
 
-from config import get_settings
-from detector.frame_generator import TrafficSimulator
-from detector.yolo_detector import YOLODetector
-from producer.kafka_producer import EdgeKafkaProducer
-from telemetry.ev_simulator import EVFleetSimulator
+# Add shared modules to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "shared"))
+sys.path.insert(0, os.path.dirname(__file__))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)-25s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+from shared.logging import setup_logging  # noqa: E402
+
+setup_logging("edge-node")
+
+import logging  # noqa: E402
+
+from config import get_settings  # noqa: E402
+from detector.frame_generator import TrafficSimulator  # noqa: E402
+from detector.yolo_detector import YOLODetector  # noqa: E402
+from producer.kafka_producer import EdgeKafkaProducer  # noqa: E402
+from shared.trace import TraceContext, new_trace_id  # noqa: E402
+from telemetry.ev_simulator import EVFleetSimulator  # noqa: E402
+
 logger = logging.getLogger("edge-node")
 settings = get_settings()
 
@@ -33,14 +39,17 @@ settings = get_settings()
 async def run_edge_node():
     """Main edge node execution loop."""
 
-    logger.info("=" * 60)
-    logger.info(f"  EdgeCloudX Edge Node [{settings.edge_node_id}]")
-    logger.info(f"  Grid: {settings.grid_rows}x{settings.grid_cols}")
-    logger.info(f"  Density: {settings.vehicle_density}")
-    logger.info(f"  YOLO: {'enabled' if settings.enable_yolo else 'simulation mode'}")
-    logger.info(f"  EVs: {settings.ev_count}")
-    logger.info(f"  Event interval: {settings.event_interval_ms}ms")
-    logger.info("=" * 60)
+    logger.info(
+        "Edge node starting",
+        extra={
+            "node_id": settings.edge_node_id,
+            "grid": f"{settings.grid_rows}x{settings.grid_cols}",
+            "density": settings.vehicle_density,
+            "yolo": settings.enable_yolo,
+            "ev_count": settings.ev_count,
+            "interval_ms": settings.event_interval_ms,
+        },
+    )
 
     # Initialize components
     producer = EdgeKafkaProducer()
@@ -70,16 +79,23 @@ async def run_edge_node():
 
     tick_count = 0
     interval = settings.event_interval_ms / 1000.0
+    start_time = time.time()
 
     try:
         while True:
             tick_count += 1
             tick_start = time.time()
 
+            # Generate a shared trace_id for this tick
+            tick_trace_id = new_trace_id()
+
             # --- Traffic Events ---
             traffic_events = simulator.tick_simulation()
 
             for event in traffic_events:
+                # Create trace context per event
+                ctx = TraceContext.new("edge-node", trace_id=tick_trace_id)
+
                 # If YOLO is enabled, generate frame and run detection
                 if detector:
                     frame = simulator.generate_frame()
@@ -88,21 +104,28 @@ async def run_edge_node():
                     event["anomaly_detected"] = detection["anomaly_detected"]
                     event["anomaly_type"] = detection["anomaly_type"]
 
+                # Inject trace context
+                event.update(ctx.as_dict())
+
                 # Send traffic event
                 await producer.send_traffic_event(event)
 
                 # Send anomaly if detected
                 if event.get("anomaly_detected"):
+                    anomaly_ctx = TraceContext.child(ctx, "edge-node")
                     await producer.send_anomaly_event({
                         "intersection_id": event["intersection_id"],
                         "anomaly_type": event["anomaly_type"],
                         "vehicle_count": event["vehicle_count"],
                         "congestion_score": event["congestion_score"],
+                        **anomaly_ctx.as_dict(),
                     })
 
             # --- EV Telemetry ---
             ev_data = ev_fleet.tick()
             for telemetry in ev_data:
+                ev_ctx = TraceContext.new("edge-node", trace_id=tick_trace_id)
+                telemetry.update(ev_ctx.as_dict())
                 await producer.send_ev_telemetry(telemetry)
 
             # --- Emergency Events (probabilistic) ---
@@ -111,23 +134,42 @@ async def run_edge_node():
                 rand_row = random.randint(0, settings.grid_rows - 1)
                 rand_col = random.randint(0, settings.grid_cols - 1)
                 random_intersection = f"int-{rand_row}-{rand_col}"
+                em_ctx = TraceContext.new("edge-node", trace_id=tick_trace_id)
                 await producer.send_emergency_alert({
                     "alert_type": random.choice(emergency_types),
                     "intersection_id": random_intersection,
                     "severity": random.choice(["medium", "high", "critical"]),
                     "description": f"Emergency detected at {random_intersection}",
+                    **em_ctx.as_dict(),
                 })
 
-            # --- Health Heartbeat (every 10 ticks) ---
-            if tick_count % 10 == 0:
+            # --- Health Heartbeat (every 5 ticks) ---
+            if tick_count % 5 == 0:
                 elapsed = time.time() - tick_start
+                uptime = time.time() - start_time
+
+                # System telemetry
+                try:
+                    import psutil
+                    cpu_percent = psutil.cpu_percent(interval=None)
+                    memory = psutil.virtual_memory()
+                    memory_percent = memory.percent
+                except ImportError:
+                    cpu_percent = -1.0
+                    memory_percent = -1.0
+
                 await producer.send_health({
+                    "node_id": settings.edge_node_id,
                     "status": "healthy",
                     "tick_count": tick_count,
                     "events_per_tick": len(traffic_events),
                     "evs_tracked": len(ev_data),
                     "tick_duration_ms": round(elapsed * 1000, 2),
                     "yolo_enabled": detector is not None,
+                    "cpu_percent": round(cpu_percent, 1),
+                    "memory_percent": round(memory_percent, 1),
+                    "fps": round(1.0 / max(elapsed, 0.001), 1),
+                    "uptime_seconds": round(uptime, 1),
                 })
 
             # --- Logging ---
@@ -140,11 +182,15 @@ async def run_edge_node():
                     / len(traffic_events)
                 )
                 logger.info(
-                    f"Tick {tick_count}: "
-                    f"vehicles={total_vehicles} "
-                    f"avg_congestion={avg_congestion:.2f} "
-                    f"EVs={len(ev_data)} "
-                    f"anomalies={sum(1 for e in traffic_events if e.get('anomaly_detected'))}"
+                    "Tick summary",
+                    extra={
+                        "trace_id": tick_trace_id,
+                        "tick": tick_count,
+                        "vehicles": total_vehicles,
+                        "avg_congestion": round(avg_congestion, 2),
+                        "evs": len(ev_data),
+                        "anomalies": sum(1 for e in traffic_events if e.get("anomaly_detected")),
+                    },
                 )
 
             # Wait for next tick
@@ -153,7 +199,7 @@ async def run_edge_node():
             await asyncio.sleep(sleep_time)
 
     except KeyboardInterrupt:
-        logger.info("Edge node shutting down (keyboard interrupt)...")
+        logger.info("Edge node shutting down (keyboard interrupt)")
     except Exception as e:
         logger.error(f"Edge node error: {e}", exc_info=True)
     finally:

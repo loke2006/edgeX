@@ -24,31 +24,37 @@ EdgeCloudX is a large-scale, distributed smart-city infrastructure platform desi
 │   Traffic Cameras    │    Edge Layer
 │  Simulated Edge AI   │    (YOLOv8 + OpenCV)
 └──────────┬───────────┘
-           │
+           │  trace_id + event_id
            ▼
-┌─────────────────────────────┐
-│       Apache Kafka Bus      │    Event Streaming
-│  traffic-density │ ev-telem │    (KRaft Mode)
-│  emergency-alerts│ anomaly  │
-└──────────┬──────────────────┘
+┌─────────────────────────────────┐
+│        Apache Kafka Bus         │    Event Streaming
+│  traffic-density │ ev-telemetry │    (KRaft Mode)
+│  emergency-alerts│ anomaly │ DLQ│
+└──────────┬──────────────────────┘
            │
-     ┌─────┴─────┐
-     ▼           ▼
+     ┌─────┴──────┐
+     ▼            ▼
+┌──────────┐ ┌──────────┐
+│   Ray    │ │ FastAPI  │    Compute + API Layer
+│  Cluster │ │ Services │    (RBAC + Audit)
+└────┬─────┘ └────┬─────┘
+     │            │
+     ▼            ▼
 ┌─────────┐ ┌──────────┐
-│  Ray    │ │ FastAPI  │    Compute + API Layer
-│ Cluster │ │ Services │
+│  Redis  │ │ Postgres │    State + Storage
 └────┬────┘ └────┬─────┘
      │           │
      ▼           ▼
-┌─────────┐ ┌──────────┐
-│  Redis  │ │ Postgres │    State + Storage
-└────┬────┘ └──────────┘
-     │
-     ▼
-┌────────────────────────┐
-│  Django Dashboard      │    Real-Time UI
-│  (Channels/WebSocket)  │    (WebSocket)
-└────────────────────────┘
+┌────────────┐ ┌──────────────────┐
+│  Dashboard │ │  Spark Streaming │  Analytics
+│ (WebSocket)│ │ (Rolling Aggs)   │
+└────────────┘ └──────────────────┘
+           ↓
+┌────────────────────────────────┐
+│   Observability Stack          │
+│  Prometheus + Grafana + Jaeger │
+│  + Loki (Structured JSON Logs) │
+└────────────────────────────────┘
 ```
 
 ## Tech Stack
@@ -56,22 +62,48 @@ EdgeCloudX is a large-scale, distributed smart-city infrastructure platform desi
 | Layer | Technology | Role |
 |-------|-----------|------|
 | Edge AI | PyTorch, YOLOv8, OpenCV | Local vehicle/anomaly detection |
-| Streaming | Apache Kafka (KRaft) | Event-driven message bus |
+| Streaming | Apache Kafka (KRaft) | Event-driven message bus + DLQ |
 | Compute | Ray | Distributed parallel processing |
-| Services | FastAPI | Async microservices |
+| Services | FastAPI | Async microservices with RBAC |
 | Dashboard | Django Channels | Real-time WebSocket UI |
 | State | Redis | Sub-second caching & Pub/Sub |
 | Storage | PostgreSQL | Historical analytics data |
-| ML | Flower | Federated learning |
+| Analytics | PySpark Structured Streaming | Rolling aggregations & trends |
+| Auth | JWT + RBAC | Role-based access control |
+| Tracing | OpenTelemetry + Jaeger | Distributed trace correlation |
+| Monitoring | Prometheus, Grafana, Loki | Metrics, dashboards, log aggregation |
 | Infra | Docker, Kubernetes | Container orchestration |
-| Monitoring | Prometheus, Grafana, Loki | Observability stack |
+
+## Features
+
+### Observability
+- **Correlation IDs** — Every event carries `trace_id` + `event_id` from edge → Kafka → service → Redis → dashboard
+- **Structured JSON Logging** — All services emit machine-parseable JSON logs with trace context
+- **Prometheus Custom Metrics** — Business-level counters, gauges, and histograms (congestion, latency, DLQ)
+- **Node Heartbeats** — Edge nodes report CPU, memory, FPS, uptime; classified as healthy/degraded/dead
+
+### Resilience
+- **Kafka Dead Letter Queue** — Failed messages retry 3x with backoff, then land in `{topic}-dlq`
+- **Adaptive Traffic Signals** — Congestion-aware signal controller (critical→green, emergency→force green corridor)
+
+### Analytics
+- **Historical Aggregation** — Hourly/daily congestion stats computed in background, stored in PostgreSQL
+- **Spark Streaming** — 5-min/15-min rolling averages, peak intersection detection, trend analysis
+- **Trend Detection** — Compare recent vs previous period to classify intersections as improving/worsening/stable
+
+### Security
+- **RBAC** — Roles: `admin`, `operator`, `viewer`, `edge_node` with permission matrix
+- **Audit Logs** — Signal changes, emergency events, user management actions logged to PostgreSQL
+- **Security Headers** — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, etc.
+- **JWT Refresh Tokens** — Separate access/refresh tokens with configurable expiration
+- **Non-Root Containers** — All Docker images run as `appuser`
 
 ## Quick Start
 
 ### Prerequisites
 - Docker Desktop with WSL2 backend
 - Python 3.11+
-- 16GB RAM minimum
+- 16GB RAM minimum (20GB recommended with Spark)
 
 ### Launch
 
@@ -98,16 +130,35 @@ curl http://localhost:8006/health  # Compute Workers
 
 | Service | Port | Description |
 |---------|------|-------------|
-| Traffic Service | 8001 | Traffic data ingestion & grid state |
+| Traffic Service | 8001 | Traffic data ingestion, adaptive signals, node monitoring |
 | Routing Service | 8002 | EV pathfinding & route optimization |
-| Analytics Service | 8003 | Congestion analytics & history |
-| Alert Service | 8004 | Emergency alert management |
-| Auth Service | 8005 | JWT authentication |
-| Compute Workers | 8006 | Ray-based distributed compute |
-| Dashboard | 8000 | Real-time operations dashboard |
+| Analytics Service | 8003 | Historical analytics, trends, peak hours, audit logs |
+| Alert Service | 8004 | Emergency alert management (RBAC-protected) |
+| Auth Service | 8005 | JWT authentication & RBAC user management |
+| Compute Workers | 8006 | Ray-based distributed compute (congestion, heatmap, prediction) |
+| Spark Analytics | — | PySpark Structured Streaming (rolling averages → Redis/Postgres) |
+| Dashboard | 8000 | Real-time operations dashboard (WebSocket) |
 | Kafka | 9092/9094 | Event streaming (internal/external) |
 | Redis | 6379 | State cache & Pub/Sub |
-| PostgreSQL | 5432 | Persistent storage |
+| PostgreSQL | 5432 | Persistent storage & analytics |
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3000 | Dashboards & visualization |
+| Jaeger | 16686 | Distributed tracing UI |
+| Loki | 3100 | Log aggregation |
+
+## Shared Module (`shared/`)
+
+Cross-cutting concerns shared by all microservices:
+
+| Module | Purpose |
+|--------|---------|
+| `trace.py` | Trace ID generation, TraceContext propagation |
+| `logging.py` | Structured JSON logging with trace correlation |
+| `metrics.py` | Custom Prometheus metric definitions |
+| `dlq.py` | Dead Letter Queue publisher + retry helper |
+| `middleware.py` | RBAC middleware + security headers |
+| `audit.py` | Audit logging to PostgreSQL |
+| `telemetry.py` | OpenTelemetry + Jaeger auto-instrumentation |
 
 ## Development Phases
 
@@ -115,10 +166,43 @@ curl http://localhost:8006/health  # Compute Workers
 - [x] **Phase 2** — Edge AI Nodes (YOLOv8, OpenCV, Kafka Producers)
 - [x] **Phase 3** — Distributed Compute (Ray Cluster)
 - [x] **Phase 4** — Real-Time Dashboard (Django Channels)
-- [ ] **Phase 5** — Cloud-Native (Kubernetes)
-- [ ] **Phase 6** — Observability (Prometheus, Grafana, Loki)
-- [ ] **Phase 7** — Federated Learning (Flower)
-- [ ] **Phase 8** — Chaos Engineering
+- [x] **Phase 5** — Observability (Trace IDs, Structured Logging, Prometheus, Heartbeats)
+- [x] **Phase 6** — Resilience (Dead Letter Queue, Adaptive Signals, Historical Analytics)
+- [x] **Phase 7** — Security (RBAC, Audit Logs, Hardening, JWT Refresh)
+- [x] **Phase 8** — Big Data (Spark Streaming, OpenTelemetry, Jaeger)
+- [ ] **Phase 9** — Cloud-Native (Kubernetes)
+- [ ] **Phase 10** — Federated Learning (Flower)
+- [ ] **Phase 11** — Chaos Engineering
+
+## API Endpoints
+
+### Auth Service
+| Method | Endpoint | Role | Description |
+|--------|----------|------|-------------|
+| POST | `/auth/register` | Public | Register new user |
+| POST | `/auth/login` | Public | Get JWT tokens |
+| POST | `/auth/refresh` | Auth | Refresh access token |
+| GET | `/auth/verify` | Auth | Verify token & get user info |
+| GET | `/auth/users` | Admin | List all users |
+| PUT | `/auth/users/{id}/role` | Admin | Change user role |
+
+### Alert Service
+| Method | Endpoint | Role | Description |
+|--------|----------|------|-------------|
+| POST | `/alerts/emergency` | Operator+ | Create manual alert |
+| GET | `/alerts/active` | Viewer+ | List active alerts |
+| POST | `/alerts/{id}/resolve` | Operator+ | Resolve an alert |
+
+### Analytics Service
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/analytics/congestion` | Real-time congestion report |
+| GET | `/analytics/heatmap` | Congestion heatmap matrix |
+| GET | `/analytics/history/hourly` | Hourly historical data |
+| GET | `/analytics/history/daily` | Daily historical data |
+| GET | `/analytics/trends` | Congestion trend analysis |
+| GET | `/analytics/peak-hours` | Busiest hours of the day |
+| GET | `/audit/logs` | Query audit logs |
 
 ## License
 

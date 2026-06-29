@@ -62,6 +62,10 @@ class TrafficEvent(Base):
     intersection_id = Column(String(50), nullable=False, index=True)
     edge_node_id = Column(String(50), nullable=False)
 
+    # Trace context
+    trace_id = Column(String(64), nullable=True, index=True)
+    event_id = Column(String(64), nullable=True)
+
     # Event data
     vehicle_count = Column(Integer, default=0)
     congestion_score = Column(Float, default=0.0)
@@ -74,4 +78,4 @@ class TrafficEvent(Base):
     received_at = Column(DateTime, default=datetime.utcnow)
 
     def __repr__(self) -> str:
-        return f"<TrafficEvent {self.intersection_id} vehicles={self.vehicle_count}>"
+        return f"<TrafficEvent {self.intersection_id} trace={self.trace_id[:8] if self.trace_id else 'none'}>"

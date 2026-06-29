@@ -3,6 +3,14 @@ EdgeCloudX Dashboard — WebSocket Consumers
 =============================================
 Django Channels consumers that subscribe to Redis Pub/Sub channels
 and stream live updates to connected browser clients.
+
+Consumers:
+- TrafficConsumer — live traffic grid updates
+- HeatmapConsumer — congestion heatmap data
+- AlertConsumer — emergency alerts and corridors
+- EVTrackerConsumer — EV telemetry updates
+- NodeHealthConsumer — edge node health status
+- SignalConsumer — adaptive signal changes
 """
 
 import asyncio
@@ -114,3 +122,17 @@ class EVTrackerConsumer(BaseRedisConsumer):
 
     redis_channel = "compute:routes:updates"
     consumer_type = "ev_tracker"
+
+
+class NodeHealthConsumer(BaseRedisConsumer):
+    """Streams edge node health status updates."""
+
+    redis_channel = "nodes:status"
+    consumer_type = "node_health"
+
+
+class SignalConsumer(BaseRedisConsumer):
+    """Streams adaptive traffic signal changes."""
+
+    redis_channel = "traffic:signals"
+    consumer_type = "signals"

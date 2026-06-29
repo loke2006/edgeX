@@ -4,30 +4,51 @@ EdgeCloudX Alert Service — Main Application
 FastAPI microservice for emergency alert management.
 Consumes emergency-alerts from Kafka, triggers green corridors,
 and notifies the dashboard via Redis Pub/Sub.
+
+Enhanced with:
+- Structured JSON logging with trace ID
+- Dead-letter queue for failed alert processing
+- RBAC-protected endpoints
+- Audit logging for emergency events
+- Custom Prometheus metrics
+- Security headers
 """
 
 import asyncio
 import json
-import logging
+import os
+import sys
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Optional
 
-import redis.asyncio as aioredis
-from aiokafka import AIOKafkaConsumer
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+# Add shared modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "shared"))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)-25s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from shared.logging import setup_logging  # noqa: E402
+
+setup_logging("alert-service")
+
+import logging  # noqa: E402
+
+import redis.asyncio as aioredis  # noqa: E402
+from aiokafka import AIOKafkaConsumer  # noqa: E402
+from fastapi import Depends, FastAPI, HTTPException  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from prometheus_fastapi_instrumentator import Instrumentator  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from pydantic_settings import BaseSettings  # noqa: E402
+from shared.audit import AuditLogger  # noqa: E402
+from shared.dlq import DeadLetterPublisher, retry_with_dlq  # noqa: E402
+from shared.metrics import (  # noqa: E402
+    ACTIVE_EMERGENCIES,
+    EVENTS_TOTAL,
+    SERVICE_INFO,
 )
+from shared.middleware import add_security_headers, require_role  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,6 +60,7 @@ class Settings(BaseSettings):
     kafka_consumer_group: str = "alert-service-group"
     redis_url: str = "redis://redis:6379/0"
     redis_alert_channel: str = "alerts:emergency"
+    database_url: str = "postgresql+asyncpg://edgecloudx:edgecloudx_secret@postgres:5432/edgecloudx"
 
     class Config:
         env_file = ".env"
@@ -72,6 +94,7 @@ class AlertResponse(BaseModel):
     description: Optional[str]
     status: str
     created_at: str
+    trace_id: Optional[str] = None
 
 
 class AlertConsumer:
@@ -80,6 +103,8 @@ class AlertConsumer:
     def __init__(self):
         self.consumer: AIOKafkaConsumer | None = None
         self._running = False
+        self.dlq: Optional[DeadLetterPublisher] = None
+        self.audit: Optional[AuditLogger] = None
 
     async def start(self):
         self.consumer = AIOKafkaConsumer(
@@ -94,7 +119,8 @@ class AlertConsumer:
                 await self.consumer.start()
                 self._running = True
                 logger.info(
-                    f"Alert Kafka consumer started — topic: {settings.kafka_emergency_topic}"
+                    "Alert Kafka consumer started",
+                    extra={"topic": settings.kafka_emergency_topic},
                 )
                 return
             except Exception as e:
@@ -111,14 +137,40 @@ class AlertConsumer:
     async def consume(self):
         if not self.consumer or not self._running:
             return
-        try:
-            async for message in self.consumer:
-                try:
-                    await _process_emergency(message.value)
-                except Exception as e:
-                    logger.error(f"Error processing alert: {e}")
-        except Exception as e:
-            logger.error(f"Alert consumer error: {e}")
+
+        while self._running:
+            try:
+                async for message in self.consumer:
+                    if not self._running:
+                        break
+                    try:
+                        if self.dlq:
+                            await retry_with_dlq(
+                                _process_emergency,
+                                message.value,
+                                dlq=self.dlq,
+                                topic=settings.kafka_emergency_topic,
+                                service="alert-service",
+                                max_retries=3,
+                            )
+                        else:
+                            await _process_emergency(message.value)
+
+                        EVENTS_TOTAL.labels(
+                            service="alert-service",
+                            topic="emergency-alerts",
+                            status="ok",
+                        ).inc()
+                    except Exception as e:
+                        logger.error(f"Error processing alert: {e}", exc_info=True)
+                        EVENTS_TOTAL.labels(
+                            service="alert-service",
+                            topic="emergency-alerts",
+                            status="error",
+                        ).inc()
+            except Exception as e:
+                logger.error(f"Alert consumer loop error: {e}. Restarting in 5s...", exc_info=True)
+                await asyncio.sleep(5)
 
 
 alert_consumer = AlertConsumer()
@@ -127,6 +179,8 @@ alert_consumer = AlertConsumer()
 async def _process_emergency(data: dict):
     """Process an incoming emergency alert."""
     alert_id = str(uuid.uuid4())[:8]
+    trace_id = data.get("trace_id", "")
+
     alert = {
         "alert_id": alert_id,
         "alert_type": data.get("alert_type", "unknown"),
@@ -135,9 +189,13 @@ async def _process_emergency(data: dict):
         "description": data.get("description", ""),
         "source_node_id": data.get("source_node_id", "unknown"),
         "status": "active",
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "trace_id": trace_id,
     }
     active_alerts[alert_id] = alert
+    ACTIVE_EMERGENCIES.set(
+        sum(1 for a in active_alerts.values() if a["status"] == "active")
+    )
 
     # Publish to Redis for dashboard
     try:
@@ -150,17 +208,53 @@ async def _process_emergency(data: dict):
 
         await r.aclose()
     except Exception as e:
-        logger.warning(f"Redis publish failed: {e}")
+        logger.warning(f"Redis publish failed: {e}", extra={"trace_id": trace_id})
+
+    # Audit log
+    if alert_consumer.audit:
+        await alert_consumer.audit.log(
+            "emergency_activated",
+            actor=data.get("source_node_id", "system"),
+            resource=alert["intersection_id"],
+            details={"alert_id": alert_id, "type": alert["alert_type"], "severity": alert["severity"]},
+            trace_id=trace_id,
+            service="alert-service",
+        )
 
     logger.warning(
-        f"🚨 EMERGENCY ALERT: {alert['alert_type']} "
-        f"at {alert['intersection_id']} (severity: {alert['severity']})"
+        "EMERGENCY ALERT",
+        extra={
+            "trace_id": trace_id,
+            "alert_id": alert_id,
+            "type": alert["alert_type"],
+            "intersection": alert["intersection_id"],
+            "severity": alert["severity"],
+        },
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("EdgeCloudX Alert Service — Starting")
+    logger.info("Alert Service starting")
+
+    # Initialize audit logger
+    audit = AuditLogger(settings.database_url)
+    await audit.init()
+    app.state.audit = audit
+    alert_consumer.audit = audit
+
+    # Initialize DLQ
+    dlq_pub = DeadLetterPublisher(settings.kafka_bootstrap_servers)
+    await dlq_pub.start()
+    alert_consumer.dlq = dlq_pub
+
+    # Store auth service URL for RBAC
+    app.state.auth_service_url = os.environ.get(
+        "AUTH_SERVICE_URL", "http://auth-service:8000"
+    )
+
+    # Prometheus service info
+    SERVICE_INFO.info({"service": "alert-service", "version": "0.2.0"})
 
     async def _start_consumer():
         await alert_consumer.start()
@@ -168,7 +262,9 @@ async def lifespan(app: FastAPI):
 
     consumer_task = asyncio.create_task(_start_consumer())
     yield
+
     await alert_consumer.stop()
+    await dlq_pub.stop()
     consumer_task.cancel()
     try:
         await consumer_task
@@ -180,7 +276,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="EdgeCloudX Alert Service",
     description="Emergency alert management and green corridor triggering",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -194,12 +290,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+add_security_headers(app)
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 @app.post("/alerts/emergency", response_model=AlertResponse)
-async def create_emergency_alert(alert: EmergencyAlert):
-    """Manually create an emergency alert."""
+async def create_emergency_alert(
+    alert: EmergencyAlert,
+    user: dict = Depends(require_role("operator", "admin")),
+):
+    """Manually create an emergency alert (requires operator or admin role)."""
     alert_id = str(uuid.uuid4())[:8]
     entry = {
         "alert_id": alert_id,
@@ -208,9 +308,13 @@ async def create_emergency_alert(alert: EmergencyAlert):
         "severity": alert.severity,
         "description": alert.description,
         "status": "active",
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "trace_id": None,
     }
     active_alerts[alert_id] = entry
+    ACTIVE_EMERGENCIES.set(
+        sum(1 for a in active_alerts.values() if a["status"] == "active")
+    )
 
     # Publish to Redis
     try:
@@ -222,23 +326,44 @@ async def create_emergency_alert(alert: EmergencyAlert):
     except Exception as e:
         logger.warning(f"Redis publish failed: {e}")
 
-    logger.warning(f"🚨 Manual alert: {alert.alert_type} at {alert.intersection_id}")
+    # Audit
+    if hasattr(app.state, "audit"):
+        await app.state.audit.log(
+            "emergency_activated",
+            actor=user.get("username", "unknown"),
+            resource=alert.intersection_id,
+            details={"alert_id": alert_id, "type": alert.alert_type, "manual": True},
+            service="alert-service",
+        )
+
+    logger.warning(
+        "Manual alert created",
+        extra={"alert_id": alert_id, "type": alert.alert_type, "intersection": alert.intersection_id},
+    )
     return AlertResponse(**entry)
 
 
 @app.get("/alerts/active", response_model=list[AlertResponse])
-async def get_active_alerts():
-    """Get all active emergency alerts."""
+async def get_active_alerts(
+    user: dict = Depends(require_role("viewer", "operator", "admin")),
+):
+    """Get all active emergency alerts (requires viewer or above)."""
     return [AlertResponse(**a) for a in active_alerts.values() if a["status"] == "active"]
 
 
 @app.post("/alerts/{alert_id}/resolve")
-async def resolve_alert(alert_id: str):
-    """Resolve an active emergency alert."""
+async def resolve_alert(
+    alert_id: str,
+    user: dict = Depends(require_role("operator", "admin")),
+):
+    """Resolve an active emergency alert (requires operator or admin)."""
     if alert_id not in active_alerts:
         raise HTTPException(status_code=404, detail="Alert not found")
 
     active_alerts[alert_id]["status"] = "resolved"
+    ACTIVE_EMERGENCIES.set(
+        sum(1 for a in active_alerts.values() if a["status"] == "active")
+    )
 
     # Clear emergency flag on intersection
     try:
@@ -249,12 +374,22 @@ async def resolve_alert(alert_id: str):
     except Exception as e:
         logger.warning(f"Redis update failed: {e}")
 
+    # Audit
+    if hasattr(app.state, "audit"):
+        await app.state.audit.log(
+            "emergency_resolved",
+            actor=user.get("username", "unknown"),
+            resource=active_alerts[alert_id]["intersection_id"],
+            details={"alert_id": alert_id},
+            service="alert-service",
+        )
+
     return {"alert_id": alert_id, "status": "resolved"}
 
 
 @app.get("/health")
 async def health():
-    return {"service": settings.service_name, "status": "healthy", "version": "0.1.0"}
+    return {"service": settings.service_name, "status": "healthy", "version": "0.2.0"}
 
 
 @app.get("/health/liveness")
@@ -264,4 +399,4 @@ async def liveness():
 
 @app.get("/")
 async def root():
-    return {"service": "EdgeCloudX Alert Service", "version": "0.1.0", "docs": "/docs"}
+    return {"service": "EdgeCloudX Alert Service", "version": "0.2.0", "docs": "/docs"}
