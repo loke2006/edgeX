@@ -70,7 +70,7 @@ def create_spark_session() -> SparkSession:
         SparkSession.builder
         .appName("EdgeCloudX-Analytics")
         .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
+                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
                 "org.postgresql:postgresql:42.7.1")
         .config("spark.sql.streaming.checkpointLocation", "/tmp/spark-checkpoints")
         .config("spark.sql.shuffle.partitions", "4")
