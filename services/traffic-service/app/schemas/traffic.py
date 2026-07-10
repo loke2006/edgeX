@@ -72,7 +72,7 @@ class HealthResponse(BaseModel):
 
     service: str
     status: str
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     kafka_connected: bool = False
     redis_connected: bool = False
     db_connected: bool = False

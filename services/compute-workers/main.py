@@ -17,8 +17,8 @@ import sys
 import signal
 import time
 
-# Add shared modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "shared"))
+# Add project root (parent of shared/) to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from shared.logging import setup_logging  # noqa: E402
 

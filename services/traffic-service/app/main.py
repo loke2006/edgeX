@@ -19,8 +19,8 @@ import asyncio
 import os
 import sys
 
-# Add shared modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "shared"))
+# Add project root (parent of shared/) to path so `from shared.xxx` works
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from shared.logging import setup_logging  # noqa: E402
 
