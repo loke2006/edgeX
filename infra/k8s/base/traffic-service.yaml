@@ -1,0 +1,103 @@
+# EdgeCloudX — Traffic Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traffic-service
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: traffic-service
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: api
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app.kubernetes.io/name: traffic-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-service
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: traffic-service
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traffic-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: traffic-service
+        app.kubernetes.io/part-of: edgecloudx
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: traffic-service
+          image: edgex-traffic-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: edgecloudx-config
+          env:
+            - name: SERVICE_NAME
+              value: "traffic-service"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: edgecloudx-secrets
+                  key: POSTGRES_PASSWORD
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: edgecloudx-secrets
+                  key: JWT_SECRET_KEY
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: traffic-service-hpa
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: traffic-service
+    app.kubernetes.io/part-of: edgecloudx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: traffic-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

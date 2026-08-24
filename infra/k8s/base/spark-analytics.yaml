@@ -1,0 +1,43 @@
+# EdgeCloudX — Spark Analytics (Streaming consumer, no Service needed)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-analytics
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: spark-analytics
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: compute
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spark-analytics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spark-analytics
+        app.kubernetes.io/part-of: edgecloudx
+        app.kubernetes.io/component: compute
+    spec:
+      containers:
+        - name: spark-analytics
+          image: edgex-spark-analytics:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: edgecloudx-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: edgecloudx-secrets
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

@@ -171,8 +171,14 @@ Cross-cutting concerns shared by all microservices:
 - [x] **Phase 4** — Real-Time Dashboard (Django Channels)
   - Live traffic grid, heatmap, alerts, EV tracking
   - Node health monitoring, adaptive signal status
-- [ ] **Phase 5** — Cloud-Native (Kubernetes)
-- [ ] **Phase 6** — Observability (Prometheus, Grafana, Loki)
+- [x] **Phase 5** — Cloud-Native (Kubernetes)
+  - Kustomize manifests for all services (base + dev/prod overlays)
+  - StatefulSets for Kafka (KRaft) and PostgreSQL
+  - HPAs for traffic-service and compute-workers
+  - ConfigMap/Secret for K8s-native config management
+  - Health probes (liveness + readiness) on all services
+  - Deploy script (`infra/k8s/deploy.bat`)
+- [x] **Phase 6** — Observability (Prometheus, Grafana, Loki)
   - Structured JSON logging with trace correlation
   - Correlation / Trace IDs (trace_id + event_id end-to-end)
   - Node heartbeats (CPU, memory, FPS, uptime)

@@ -1,0 +1,9 @@
+# EdgeCloudX — Prod Overlay
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: resource-patches.yaml

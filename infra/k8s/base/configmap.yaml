@@ -1,0 +1,53 @@
+# EdgeCloudX — Shared Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgecloudx-config
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/part-of: edgecloudx
+data:
+  # Kafka
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  KAFKA_TOPICS: "traffic-density,ev-telemetry,emergency-alerts,anomaly-events,node-health"
+
+  # Redis
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_URL: "redis://redis:6379/0"
+
+  # PostgreSQL
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "edgecloudx"
+  POSTGRES_USER: "edgecloudx"
+  DATABASE_URL: "postgresql+asyncpg://edgecloudx:edgecloudx_secret@postgres:5432/edgecloudx"
+
+  # Auth
+  JWT_ALGORITHM: "HS256"
+  JWT_EXPIRATION_MINUTES: "60"
+  AUTH_SERVICE_URL: "http://auth-service:8000"
+
+  # Edge Node
+  EDGE_NODE_ID: "edge-node-01"
+  INTERSECTION_COUNT: "16"
+  VEHICLE_DENSITY: "medium"
+  EVENT_INTERVAL_MS: "1000"
+
+  # Grid
+  GRID_ROWS: "4"
+  GRID_COLS: "4"
+
+  # Service Names
+  SERVICE_NAME_TRAFFIC: "traffic-service"
+  SERVICE_NAME_ROUTING: "routing-service"
+  SERVICE_NAME_ANALYTICS: "analytics-service"
+  SERVICE_NAME_ALERT: "alert-service"
+  SERVICE_NAME_AUTH: "auth-service"
+  SERVICE_NAME_COMPUTE: "compute-workers"
+
+  # Monitoring
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+
+  # Spark
+  JDBC_URL: "jdbc:postgresql://postgres:5432/edgecloudx"

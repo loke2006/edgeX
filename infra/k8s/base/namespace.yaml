@@ -1,0 +1,8 @@
+# EdgeCloudX Kubernetes Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edgecloudx
+  labels:
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/managed-by: kustomize

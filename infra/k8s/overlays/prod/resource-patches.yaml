@@ -1,0 +1,98 @@
+# EdgeCloudX — Prod Resource Patches
+# Higher replicas and resource limits for production
+
+# Multiple traffic-service replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-service
+  namespace: edgecloudx
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: traffic-service
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+# Multiple compute-workers replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compute-workers
+  namespace: edgecloudx
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: compute-workers
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+# Kafka with more resources
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: edgecloudx
+spec:
+  template:
+    spec:
+      containers:
+        - name: kafka
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+# Postgres with more resources
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: edgecloudx
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+# Multiple dashboard replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: edgecloudx
+spec:
+  replicas: 2
+---
+# Multiple edge nodes in prod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-node
+  namespace: edgecloudx
+spec:
+  replicas: 3

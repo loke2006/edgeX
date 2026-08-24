@@ -1,0 +1,99 @@
+# EdgeCloudX — Ingress (optional, for use with nginx-ingress-controller)
+# If not using an Ingress controller, access services via NodePort instead:
+#   Dashboard:  http://localhost:30080
+#   Grafana:    http://localhost:30030
+#   Prometheus: http://localhost:30090
+#   Jaeger:     http://localhost:30686
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edgecloudx-ingress
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/part-of: edgecloudx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # WebSocket support for dashboard
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: edgecloudx.local
+      http:
+        paths:
+          # Dashboard (frontend)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 8000
+
+          # API Services
+          - path: /api/traffic
+            pathType: Prefix
+            backend:
+              service:
+                name: traffic-service
+                port:
+                  number: 8000
+
+          - path: /api/routing
+            pathType: Prefix
+            backend:
+              service:
+                name: routing-service
+                port:
+                  number: 8000
+
+          - path: /api/analytics
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics-service
+                port:
+                  number: 8000
+
+          - path: /api/alerts
+            pathType: Prefix
+            backend:
+              service:
+                name: alert-service
+                port:
+                  number: 8000
+
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 8000
+
+    # Monitoring UIs
+    - host: grafana.edgecloudx.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+
+    - host: jaeger.edgecloudx.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jaeger
+                port:
+                  number: 16686

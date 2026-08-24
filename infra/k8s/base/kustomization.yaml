@@ -1,0 +1,45 @@
+# EdgeCloudX — Base Kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: edgecloudx
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: edgecloudx
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false
+
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # Configuration
+  - configmap.yaml
+  - secret.yaml
+
+  # Infrastructure
+  - kafka.yaml
+  - kafka-init.yaml
+  - redis.yaml
+  - postgres.yaml
+
+  # Application Services
+  - traffic-service.yaml
+  - routing-service.yaml
+  - analytics-service.yaml
+  - alert-service.yaml
+  - auth-service.yaml
+  - compute-workers.yaml
+  - edge-node.yaml
+  - spark-analytics.yaml
+  - dashboard.yaml
+
+  # Monitoring
+  - prometheus.yaml
+  - grafana.yaml
+  - loki.yaml
+  - jaeger.yaml
+
+  # Networking (optional — remove if no ingress controller)
+  # - ingress.yaml

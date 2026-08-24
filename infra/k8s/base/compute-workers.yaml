@@ -1,0 +1,95 @@
+# EdgeCloudX — Compute Workers (Ray)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compute-workers
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: compute-workers
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: compute
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app.kubernetes.io/name: compute-workers
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compute-workers
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: compute-workers
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: compute
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: compute-workers
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: compute-workers
+        app.kubernetes.io/part-of: edgecloudx
+        app.kubernetes.io/component: compute
+    spec:
+      containers:
+        - name: compute-workers
+          image: edgex-compute-workers:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: edgecloudx-config
+          env:
+            - name: SERVICE_NAME
+              value: "compute-workers"
+            - name: RAY_NUM_CPUS
+              value: "2"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: compute-workers-hpa
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: compute-workers
+    app.kubernetes.io/part-of: edgecloudx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: compute-workers
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

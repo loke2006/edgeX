@@ -1,0 +1,70 @@
+# EdgeCloudX — Routing Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routing-service
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: routing-service
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: api
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app.kubernetes.io/name: routing-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routing-service
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: routing-service
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: routing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: routing-service
+        app.kubernetes.io/part-of: edgecloudx
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: routing-service
+          image: edgex-routing-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: edgecloudx-config
+          env:
+            - name: SERVICE_NAME
+              value: "routing-service"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

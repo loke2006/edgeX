@@ -1,0 +1,149 @@
+# EdgeCloudX — Prometheus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: "traffic-service"
+        static_configs:
+          - targets: ["traffic-service:8000"]
+        metrics_path: /metrics
+
+      - job_name: "routing-service"
+        static_configs:
+          - targets: ["routing-service:8000"]
+        metrics_path: /metrics
+
+      - job_name: "analytics-service"
+        static_configs:
+          - targets: ["analytics-service:8000"]
+        metrics_path: /metrics
+
+      - job_name: "alert-service"
+        static_configs:
+          - targets: ["alert-service:8000"]
+        metrics_path: /metrics
+
+      - job_name: "auth-service"
+        static_configs:
+          - targets: ["auth-service:8000"]
+        metrics_path: /metrics
+
+      - job_name: "compute-workers"
+        static_configs:
+          - targets: ["compute-workers:8000"]
+        metrics_path: /metrics
+
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: monitoring
+spec:
+  type: NodePort
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30090
+  selector:
+    app.kubernetes.io/name: prometheus
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: edgecloudx
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: edgecloudx
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: edgecloudx
+    app.kubernetes.io/component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/part-of: edgecloudx
+        app.kubernetes.io/component: monitoring
+    spec:
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: prometheus
+          image: prom/prometheus:latest
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=7d"
+          ports:
+            - containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data

@@ -1,0 +1,59 @@
+# EdgeCloudX — Dev Resource Patches
+# Lower resource limits for local Docker Desktop / Minikube
+
+# Scale down Kafka resources for dev
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: edgecloudx
+spec:
+  template:
+    spec:
+      containers:
+        - name: kafka
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+---
+# Scale down compute-workers for dev
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compute-workers
+  namespace: edgecloudx
+spec:
+  template:
+    spec:
+      containers:
+        - name: compute-workers
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+# Scale down Spark for dev
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-analytics
+  namespace: edgecloudx
+spec:
+  template:
+    spec:
+      containers:
+        - name: spark-analytics
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
